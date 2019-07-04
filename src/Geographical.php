@@ -49,6 +49,31 @@ trait Geographical
         return $query->havingRaw('distance BETWEEN ? AND ?', [$inner_radius, $outer_radius]);
     }
 
+    public function scopeGeofenceCutOff($query, $latitude, $longitude, $inner_radius, $outer_radius)
+    {
+        $R = 6371;
+        $latName = $this->getQualifiedLatitudeColumn();
+        $lonName = $this->getQualifiedLongitudeColumn();
+        $correctionRadius = $this->getCorrectionRadius();
+
+        if ($correctionRadius <= $outer_radius) {
+          $maxLat = $latitude + rad2deg($outer_radius / $R);
+          $minLat = $latitude - rad2deg($outer_radius / $R);
+        } else {
+          $maxLat = $latitude + asin(rad2deg($outer_radius / $R)) / cos($longitude);
+          $minLat = $latitude - asin(rad2deg($outer_radius / $R)) / cos($longitude);
+        }
+
+        $maxLon = $longitude + rad2deg(asin($outer_radius / $R) / cos(deg2rad($latitude)));
+        $minLon = $longitude - rad2deg(asin($outer_radius / $R) / cos(deg2rad($latitude)));
+        $query = $query->fromSub(function ($query) use ($latName, $lonName, $minLat, $maxLat, $minLon, $maxLon) {
+          $query->from($this->getTable())
+              ->whereBetween($latName, [$minLat, $maxLat])
+              ->whereBetween($lonName, [$minLon, $maxLon]);
+        }, $this->getTable()); 
+        return $this->scopeDistance($query, $latitude, $longitude, $inner_radius, $outer_radius);
+  }
+
     protected function getQualifiedLatitudeColumn()
     {
         return $this->getTable() . '.' . $this->getLatitudeColumn();
@@ -67,6 +92,11 @@ trait Geographical
     public function getLongitudeColumn()
     {
         return defined('static::LONGITUDE') ? static::LONGITUDE : 'longitude';
+    }
+    
+    public function getCorrectionRadius()
+    {
+        return defined('static::CORRECTION_RADIUS') ? static ::CORRECTION_RADIUS : 'correction_radius';
     }
 }
 
